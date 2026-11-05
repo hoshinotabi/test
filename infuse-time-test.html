@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Infuse 時刻指定テスト</title>
+<style>
+:root{--bg:#fff;--ink:#2a2c26;--muted:#6a6e64;--line:#b7a78c;--deep:#556148;--wash:#eef1e4;--danger:#9a5340}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 -apple-system,"Hiragino Sans",sans-serif}
+main{max-width:560px;margin:0 auto;padding:16px 16px 40px}
+h1{font-size:18px;margin:4px 0 2px}p.s{margin:0 0 8px;color:var(--muted);font-size:13px}
+section{border:1px solid var(--line);border-radius:12px;padding:12px;margin:12px 0}
+h2{font-size:14px;margin:0 0 8px;color:var(--deep)}
+textarea{width:100%;min-height:72px;font:13px/1.4 ui-monospace,Menlo,monospace;border:1px solid var(--line);border-radius:8px;padding:8px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px}
+button{appearance:none;border:1px solid var(--deep);background:var(--deep);color:#fff;border-radius:999px;padding:8px 14px;font-size:14px;cursor:pointer}
+button.ghost{background:#fff;color:var(--deep)}
+input[type=number]{width:4.5em;font-size:15px;padding:6px;border:1px solid var(--line);border-radius:8px}
+#msg{font-size:13px;color:var(--danger);min-height:1em}
+ol.log{margin:0;padding-left:1.2em;font-size:13px}ol.log li{margin:4px 0;word-break:break-all}
+label.ck{display:flex;gap:8px;align-items:flex-start;margin:6px 0;font-size:14px}
+</style></head><body><main>
+<h1>Infuse 時刻指定テスト</h1>
+<p class="s">藏 v0.5.5 同梱。URL はこの端末にだけ保存されます。</p>
+<section><h2>1. 動画のURL</h2>
+<textarea id="url" placeholder="動画の http(s) URL、または infuse:// のリンクを貼り付け"></textarea>
+<div class="row"><button id="save">保存</button><button class="ghost" id="clr">消去</button></div>
+<div id="msg"></div></section>
+<section><h2>2. 位置を指定して再生</h2>
+<div class="row"><button data-pos="0">0:00</button><button data-pos="60">1:00</button><button data-pos="180">3:00</button></div>
+<div class="row"><input id="mm" type="number" min="0" inputmode="numeric" value="2"> 分 <input id="ss" type="number" min="0" max="59" inputmode="numeric" value="30"> 秒 <button id="go">この位置で再生</button></div>
+<p class="s" style="margin-top:8px">Infuse で再生を終えて閉じると、このページに戻って再生位置が記録されます。</p></section>
+<section><h2>3. 記録</h2><ol class="log" id="log"></ol>
+<div class="row"><button id="copy">結果をコピー</button><button class="ghost" id="wipe">結果を消去</button></div></section>
+<section><h2>4. チェック</h2><div id="chk"></div>
+<textarea id="memo" placeholder="気づいたこと"></textarea></section>
+</main>
+<script>
+(function(){
+  var K = "kura.infuse.test.";
+  var CH = ["Infuse が開いた","1:00 から始まった","3:00 から始まった","閉じたらこのページに戻った","戻った位置が記録された"];
+  function $(id){ return document.getElementById(id); }
+  function get(k, d){ try { var v = localStorage.getItem(K + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } }
+  function set(k, v){ try { localStorage.setItem(K + k, JSON.stringify(v)); } catch (e) {} }
+  function esc(s){ return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
+  function norm(u){
+    u = String(u || "").trim();
+    var m = u.match(/^infuse:\/\/[^?]*\?(?:.*&)?url=([^&]+)/i);
+    if (m) { try { u = decodeURIComponent(m[1]); } catch (e) {} }
+    if (/[^\x21-\x7e]/.test(u)) { try { u = encodeURI(decodeURI(u)); } catch (e) {} }
+    return u;
+  }
+  function fname(u){ var f = String(u || "").split("?")[0].split("/").pop(); try { return decodeURIComponent(f); } catch (e) { return f; } }
+  function fmt(sec){ sec = Math.max(0, Math.round(Number(sec) || 0)); return Math.floor(sec / 60) + ":" + ("0" + sec % 60).slice(-2); }
+  function back(r){ return location.href.split("?")[0].split("#")[0] + "?ret=" + r; }
+  function addLog(t){ var log = get("log", []); log.unshift(t); set("log", log.slice(0, 10)); }
+  function render(){ var log = get("log", []); $("log").innerHTML = log.length ? log.map(function(x){ return "<li>" + esc(x) + "</li>"; }).join("") : "<li>まだありません</li>"; }
+  function play(pos){
+    var u = norm($("url").value);
+    if (!/^https?:\/\//i.test(u)) { $("msg").textContent = "http(s) の URL を入れてください"; return; }
+    $("url").value = u; $("msg").textContent = ""; set("url", u); set("req", { pos:pos, at:Date.now() });
+    location.href = "infuse://x-callback-url/play?url=" + encodeURIComponent(u) + "&position=" + pos + "&x-success=" + encodeURIComponent(back("ok")) + "&x-error=" + encodeURIComponent(back("err"));
+  }
+  var q = new URLSearchParams(location.search), ret = q.get("ret");
+  if (ret) {
+    var req = get("req", {}), now = new Date(), ts = now.getHours() + ":" + ("0" + now.getMinutes()).slice(-2);
+    if (ret === "ok") { var p = q.get("position"); addLog(ts + " 指定 " + fmt(req.pos) + " → 戻り位置 " + (p == null ? "（なし）" : fmt(p) + "（" + p + "秒）") + " / " + fname(q.get("lastPlayedUrl"))); }
+    else addLog(ts + " エラー " + (q.get("errorCode") || "") + " " + (q.get("errorMessage") || "") + " / " + fname(q.get("failedUrl")));
+    history.replaceState(null, "", location.pathname);
+  }
+  $("url").value = get("url", "");
+  var cs = get("chk", {});
+  $("chk").innerHTML = CH.map(function(t, i){ return '<label class="ck"><input type="checkbox" data-i="' + i + '"' + (cs[i] ? " checked" : "") + '>' + t + '</label>'; }).join("");
+  $("memo").value = cs.memo || "";
+  $("chk").addEventListener("change", function(e){ var i = e.target.getAttribute("data-i"); if (i != null) { cs[i] = e.target.checked; set("chk", cs); } });
+  $("memo").addEventListener("input", function(){ cs.memo = $("memo").value; set("chk", cs); });
+  $("save").onclick = function(){ var u = norm($("url").value); $("url").value = u; set("url", u); $("msg").textContent = u ? "保存しました" : ""; };
+  $("clr").onclick = function(){ $("url").value = ""; set("url", ""); $("msg").textContent = ""; };
+  Array.prototype.forEach.call(document.querySelectorAll("[data-pos]"), function(b){ b.onclick = function(){ play(Number(b.getAttribute("data-pos"))); }; });
+  $("go").onclick = function(){ play((Number($("mm").value) || 0) * 60 + (Number($("ss").value) || 0)); };
+  function fb(t){ var a = document.createElement("textarea"); a.value = t; document.body.appendChild(a); a.select(); try { document.execCommand("copy"); } catch (e) {} a.remove(); }
+  $("copy").onclick = function(){
+    var t = "Infuse 時刻指定テスト\n" + CH.map(function(c, i){ return (cs[i] ? "[x] " : "[ ] ") + c; }).join("\n") + "\n記録:\n" + get("log", []).join("\n") + (cs.memo ? "\nメモ: " + cs.memo : "");
+    var done = function(){ $("msg").textContent = "コピーしました"; };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(done, function(){ fb(t); done(); }); else { fb(t); done(); }
+  };
+  $("wipe").onclick = function(){ set("log", []); render(); };
+  render();
+})();
+</script></body></html>
